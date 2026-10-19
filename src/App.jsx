@@ -11,6 +11,8 @@ import Employees from './pages/Employees'
 import EmployeePage from './pages/EmployeePage'
 import Equipment from './pages/Equipment'
 import EquipmentPage from './pages/EquipmentPage'
+import Costumes from './pages/Costumes'
+import CostumePage from './pages/CostumePage'
 
 const NAV = [
   ['/calendar', 'Календарь', '◫'],
@@ -18,6 +20,7 @@ const NAV = [
   ['/tasks', 'Задачи', '☑'],
   ['/employees', 'Сотрудники', '◉'],
   ['/equipment', 'Оборудование', '▣'],
+  ['/costumes', 'Костюмы', '✦'],
 ]
 
 function Shell({ session }) {
@@ -61,6 +64,8 @@ function Shell({ session }) {
             <Route path="/employees/:id" element={<EmployeePage />} />
             <Route path="/equipment" element={<Equipment />} />
             <Route path="/equipment/:id" element={<EquipmentPage />} />
+            <Route path="/costumes" element={<Costumes />} />
+            <Route path="/costumes/:id" element={<CostumePage />} />
             <Route path="*" element={<Navigate to="/calendar" replace />} />
           </Routes>
         </DataProvider>

@@ -56,6 +56,7 @@ export const EVENT_STATUS = {
 export const TASK_STATUS = { todo: 'К выполнению', doing: 'В работе', done: 'Готово' }
 export const PRIORITY = { low: 'Низкий', normal: 'Обычный', high: 'Высокий' }
 export const EQ_STATUS = { ok: 'Исправно', repair: 'В ремонте' }
+export const COSTUME_STATUS = { ok: 'В наличии', cleaning: 'В чистке', repair: 'В ремонте' }
 
 // Приглушённая серебристая палитра (с мягкими акцентами)
 export const PALETTE = ['#d4d6db', '#a4a9b3', '#7f8896', '#b9a99a', '#8fa3b8', '#9fb09b', '#b49aa6']
@@ -106,4 +107,20 @@ export function eqConflicts(d, equipmentId, event, qty = 1) {
     repair: eq?.status === 'repair',
     over: used > total || blocks.length > 0 || eq?.status === 'repair',
   }
+}
+
+// Проверка занятости костюма на мероприятии
+export function costumeConflicts(d, costumeId, event, qty = 1) {
+  const c = d.costumes.find((e) => e.id === costumeId)
+  const others = d.event_costumes
+    .filter((x) => x.costume_id === costumeId && x.event_id !== event.id)
+    .map((x) => ({ link: x, ev: d.events.find((e) => e.id === x.event_id) }))
+    .filter(({ ev }) => ev && ev.status !== 'cancelled' && overlaps(ev.start_at, ev.end_at, event.start_at, event.end_at))
+  const blocks = d.costume_blocks.filter(
+    (b) => b.costume_id === costumeId && overlaps(b.start_at, b.end_at, event.start_at, event.end_at)
+  )
+  const used = others.reduce((s, { link }) => s + link.qty, 0) + qty
+  const total = c?.quantity || 1
+  const bad = c && c.status !== 'ok'
+  return { others, blocks, bad, status: c?.status, over: used > total || blocks.length > 0 || Boolean(bad) }
 }

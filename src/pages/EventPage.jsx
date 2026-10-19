@@ -4,37 +4,60 @@ import { useData } from '../data'
 import EventForm from '../components/EventForm'
 import TaskBoard from '../components/TaskBoard'
 import { Avatar, Chip, Empty, Field, Modal, PageHead, confirmDelete } from '../components/ui'
-import { EVENT_STATUS, eqConflicts, fmtRange, hhmm } from '../utils'
+import { EVENT_STATUS, COSTUME_STATUS, costumeConflicts, eqConflicts, fmtRange, hhmm } from '../utils'
 
 /* ---------- Тайминг ---------- */
 function SegmentForm({ initial, event, onClose }) {
   const d = useData()
+  const editing = Boolean(initial?.id)
   const [f, setF] = useState({
-    start_time: '',
-    end_time: '',
-    title: '',
-    structure: '',
-    employee_id: '',
-    ...Object.fromEntries(Object.entries(initial || {}).map(([k, v]) => [k, v ?? ''])),
+    start_time: hhmm(initial?.start_time),
+    end_time: hhmm(initial?.end_time),
+    title: initial?.title || '',
+    structure: initial?.structure || '',
   })
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v }))
-  const editing = Boolean(initial?.id)
-  const staff = d.event_employees.filter((x) => x.event_id === event.id).map((x) => d.employees.find((m) => m.id === x.employee_id)).filter(Boolean)
+
+  const current = editing ? d.event_timing_employees.filter((x) => x.timing_id === initial.id).map((x) => x.employee_id) : []
+  const [sel, setSel] = useState(() => new Set(current))
+  const [busy, setBusy] = useState(false)
+
+  // сотрудники события + те, кто уже назначен на этот отрезок
+  const staffIds = d.event_employees.filter((x) => x.event_id === event.id).map((x) => x.employee_id)
+  const listIds = [...new Set([...staffIds, ...current])]
+  const people = listIds.map((id) => d.employees.find((m) => m.id === id)).filter(Boolean)
+
+  const toggle = (id) =>
+    setSel((s) => {
+      const n = new Set(s)
+      n.has(id) ? n.delete(id) : n.add(id)
+      return n
+    })
 
   const submit = async (e) => {
     e.preventDefault()
-    if (!f.title.trim() || !f.start_time) return
-    const { id, created_at, ...rest } = f
+    if (!f.title.trim() || !f.start_time || busy) return
+    setBusy(true)
     const row = {
-      ...rest,
       event_id: event.id,
       title: f.title.trim(),
+      start_time: f.start_time,
       end_time: f.end_time || null,
-      employee_id: f.employee_id || null,
       structure: f.structure.trim() || null,
     }
-    const ok = editing ? await d.update('event_timing', initial.id, row) : await d.insert('event_timing', row)
-    if (ok) onClose()
+    let tid = initial?.id
+    if (editing) {
+      if (!(await d.update('event_timing', tid, row))) return setBusy(false)
+    } else {
+      const r = await d.insert('event_timing', row)
+      if (!r || !r.id) return setBusy(false)
+      tid = r.id
+    }
+    const add = [...sel].filter((x) => !current.includes(x))
+    const del = current.filter((x) => !sel.has(x))
+    if (add.length) await d.insertMany('event_timing_employees', add.map((employee_id) => ({ timing_id: tid, employee_id })))
+    for (const employee_id of del) await d.removeWhere('event_timing_employees', { timing_id: tid, employee_id })
+    onClose()
   }
 
   return (
@@ -42,10 +65,10 @@ function SegmentForm({ initial, event, onClose }) {
       <form className="form" onSubmit={submit}>
         <div className="row2">
           <Field label="Начало">
-            <input className="input" type="time" value={hhmm(f.start_time)} onChange={(e) => set('start_time')(e.target.value)} />
+            <input className="input" type="time" value={f.start_time} onChange={(e) => set('start_time')(e.target.value)} />
           </Field>
           <Field label="Конец">
-            <input className="input" type="time" value={hhmm(f.end_time)} onChange={(e) => set('end_time')(e.target.value)} />
+            <input className="input" type="time" value={f.end_time} onChange={(e) => set('end_time')(e.target.value)} />
           </Field>
         </div>
         <Field label="Название блока">
@@ -54,21 +77,41 @@ function SegmentForm({ initial, event, onClose }) {
         <Field label="Структура" hint="Каждый пункт с новой строки">
           <textarea className="input" rows={6} value={f.structure} onChange={(e) => set('structure')(e.target.value)} />
         </Field>
-        <Field label="Ответственный">
-          <select className="input" value={f.employee_id} onChange={(e) => set('employee_id')(e.target.value)}>
-            <option value="">Не назначен</option>
-            {staff.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <div className="field">
+          <span>
+            Ответственные {sel.size > 0 && <b className="count">· выбрано {sel.size}</b>}
+          </span>
+          {people.length > 0 ? (
+            <>
+              <div className="pick-list">
+                {people.map((m) => (
+                  <label key={m.id} className={`pick ${sel.has(m.id) ? 'on' : ''}`}>
+                    <input type="checkbox" checked={sel.has(m.id)} onChange={() => toggle(m.id)} />
+                    <Avatar emp={m} size={22} />
+                    <span>{m.name}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="pick-tools">
+                <button type="button" className="linkbtn" onClick={() => setSel(new Set(people.map((m) => m.id)))}>
+                  Выбрать всех
+                </button>
+                <button type="button" className="linkbtn" onClick={() => setSel(new Set())}>
+                  Снять выбор
+                </button>
+              </div>
+            </>
+          ) : (
+            <small>Сначала добавьте сотрудников на событие (блок «Сотрудники» справа).</small>
+          )}
+        </div>
         <div className="form-actions">
           <button type="button" className="btn ghost" onClick={onClose}>
             Отмена
           </button>
-          <button className="btn primary">Сохранить</button>
+          <button className="btn primary" disabled={busy}>
+            Сохранить
+          </button>
         </div>
       </form>
     </Modal>
@@ -97,7 +140,10 @@ function Timing({ event }) {
       {!rows.length && <Empty>Тайминг пуст. Добавьте первый отрезок.</Empty>}
       <div className="timeline">
         {rows.map((t) => {
-          const resp = d.employees.find((m) => m.id === t.employee_id)
+          const resp = d.event_timing_employees
+            .filter((x) => x.timing_id === t.id)
+            .map((x) => d.employees.find((m) => m.id === x.employee_id))
+            .filter(Boolean)
           const items = (t.structure || '').split('\n').map((s) => s.trim()).filter(Boolean)
           return (
             <div key={t.id} className="seg-row">
@@ -108,7 +154,6 @@ function Timing({ event }) {
               <div className="seg-body">
                 <div className="seg-title">
                   {t.title}
-                  {resp && <Avatar emp={resp} size={22} />}
                   <span className="seg-actions">
                     <button className="icon-btn" onClick={() => setForm(t)} title="Изменить">
                       ✎
@@ -122,6 +167,16 @@ function Timing({ event }) {
                     </button>
                   </span>
                 </div>
+                {resp.length > 0 && (
+                  <div className="seg-people">
+                    {resp.map((m) => (
+                      <Link key={m.id} to={`/employees/${m.id}`} className="person-tag">
+                        <Avatar emp={m} size={18} />
+                        {m.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
                 {items.length > 0 && (
                   <ul className="seg-list">
                     {items.map((s, i) => (
@@ -155,6 +210,17 @@ function Staff({ event }) {
     setRole('')
   }
 
+  const remove = async (employee_id) => {
+    // заодно снимаем сотрудника с отрезков тайминга этого события
+    const timingIds = d.event_timing.filter((t) => t.event_id === event.id).map((t) => t.id)
+    for (const timing_id of timingIds) {
+      if (d.event_timing_employees.some((x) => x.timing_id === timing_id && x.employee_id === employee_id)) {
+        await d.removeWhere('event_timing_employees', { timing_id, employee_id })
+      }
+    }
+    await d.removeWhere('event_employees', { event_id: event.id, employee_id })
+  }
+
   return (
     <div className="card">
       <div className="card-head">
@@ -172,7 +238,7 @@ function Staff({ event }) {
                 {m.name}
                 <small>{a.role || m.role || ''}</small>
               </Link>
-              <button className="icon-btn" onClick={() => d.removeWhere('event_employees', { event_id: event.id, employee_id: a.employee_id })}>
+              <button className="icon-btn" onClick={() => remove(a.employee_id)}>
                 ✕
               </button>
             </div>
@@ -296,6 +362,106 @@ function Gear({ event }) {
   )
 }
 
+/* ---------- Костюмы ---------- */
+function Costumes({ event }) {
+  const d = useData()
+  const [cs, setCs] = useState('')
+  const [qty, setQty] = useState(1)
+  const [note, setNote] = useState('')
+  const assigned = d.event_costumes.filter((x) => x.event_id === event.id)
+  const free = d.costumes.filter((m) => !assigned.some((a) => a.costume_id === m.id))
+  const save = (row) => d.upsert('event_costumes', { event_id: event.id, ...row }, 'event_id,costume_id')
+
+  const add = async (e) => {
+    e.preventDefault()
+    if (!cs) return
+    const c = costumeConflicts(d, cs, event, Number(qty))
+    if (c.over && !window.confirm('Этот костюм занят или недоступен в это время. Всё равно добавить?')) return
+    await save({ costume_id: cs, qty: Number(qty) || 1, note: note.trim() || null })
+    setCs('')
+    setQty(1)
+    setNote('')
+  }
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h2>Костюмы</h2>
+        <em>{assigned.length}</em>
+      </div>
+      <div className="stack">
+        {assigned.map((a) => {
+          const m = d.costumes.find((x) => x.id === a.costume_id)
+          if (!m) return null
+          const c = costumeConflicts(d, m.id, event, a.qty)
+          return (
+            <div key={a.costume_id} className="line">
+              <div className="line-main">
+                <Link to={`/costumes/${m.id}`}>
+                  {m.name}
+                  {m.size ? <span className="muted-inline"> · {m.size}</span> : null}
+                </Link>
+                {c.over && (
+                  <small className="warn">
+                    ⚠{' '}
+                    {c.bad
+                      ? COSTUME_STATUS[c.status].toLowerCase()
+                      : c.blocks.length
+                      ? `заблокирован: ${c.blocks[0].reason || 'занят'}`
+                      : `занят: ${c.others.map(({ ev }) => ev.title).join(', ') || 'не хватает единиц'}`}
+                  </small>
+                )}
+                <input
+                  className="input note"
+                  placeholder="Кому / комментарий"
+                  defaultValue={a.note || ''}
+                  onBlur={(e) => e.target.value !== (a.note || '') && save({ costume_id: a.costume_id, qty: a.qty, note: e.target.value.trim() || null })}
+                />
+              </div>
+              <input
+                className="input qty"
+                type="number"
+                min="1"
+                value={a.qty}
+                onChange={(e) => save({ costume_id: a.costume_id, qty: Number(e.target.value) || 1, note: a.note })}
+                title="Количество"
+              />
+              <button className="icon-btn" onClick={() => d.removeWhere('event_costumes', { event_id: event.id, costume_id: a.costume_id })}>
+                ✕
+              </button>
+            </div>
+          )
+        })}
+      </div>
+      {free.length > 0 ? (
+        <form className="inline-form" onSubmit={add}>
+          <select className="input sm" value={cs} onChange={(e) => setCs(e.target.value)}>
+            <option value="">Костюм…</option>
+            {free.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+                {m.size ? ` (${m.size})` : ''}
+                {costumeConflicts(d, m.id, event, 1).over ? ' — занят' : ''}
+              </option>
+            ))}
+          </select>
+          <input className="input sm qty" type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} />
+          <input className="input sm" placeholder="Кому / комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
+          <button className="btn sm primary" disabled={!cs}>
+            Добавить
+          </button>
+        </form>
+      ) : (
+        !d.costumes.length && (
+          <p className="hint">
+            Сначала добавьте костюмы в разделе <Link to="/costumes">Костюмы</Link>.
+          </p>
+        )
+      )}
+    </div>
+  )
+}
+
 /* ---------- Страница ---------- */
 export default function EventPage() {
   const { id } = useParams()
@@ -352,6 +518,7 @@ export default function EventPage() {
         <div className="side-col">
           <Staff event={ev} />
           <Gear event={ev} />
+          <Costumes event={ev} />
         </div>
       </div>
 

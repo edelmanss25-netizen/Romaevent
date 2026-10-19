@@ -13,6 +13,10 @@ const TABLES = [
   'equipment',
   'event_equipment',
   'equipment_blocks',
+  'event_timing_employees',
+  'costumes',
+  'event_costumes',
+  'costume_blocks',
 ]
 const empty = Object.fromEntries(TABLES.map((t) => [t, []]))
 
@@ -65,6 +69,7 @@ export function DataProvider({ children }) {
   }
 
   const api = {
+    insertMany: (t, rows) => run(t, supabase.from(t).insert(rows)),
     insert: (t, row) => run(t, supabase.from(t).insert(row).select().single()),
     update: (t, id, patch) => run(t, supabase.from(t).update(patch).eq('id', id)),
     remove: (t, id) => run(t, supabase.from(t).delete().eq('id', id), true),
